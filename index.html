@@ -1,0 +1,2750 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kimbundu — Estudo prático</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', system-ui, sans-serif; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+
+// Shim de storage: usa localStorage do browser
+const browserStorage = {
+  async get(key) {
+    const v = localStorage.getItem(key);
+    return v === null ? null : { key, value: v };
+  },
+  async set(key, value) {
+    localStorage.setItem(key, value);
+    return { key, value };
+  },
+  async delete(key) {
+    localStorage.removeItem(key);
+    return { key, deleted: true };
+  }
+};
+if (typeof window !== 'undefined') window.storage = window.storage || browserStorage;
+
+// Síntese de voz: usa voz portuguesa para aproximar pronúncia do Kimbundu
+const KbTTS = {
+  speak(text, opts = {}) {
+    if (!('speechSynthesis' in window)) return false;
+    // Cancelar qualquer fala em curso
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    // Procurar voz portuguesa
+    const voices = window.speechSynthesis.getVoices();
+    const ptVoice = voices.find(v => v.lang === 'pt-PT') 
+                 || voices.find(v => v.lang === 'pt-BR') 
+                 || voices.find(v => v.lang.startsWith('pt'));
+    if (ptVoice) utter.voice = ptVoice;
+    utter.lang = ptVoice ? ptVoice.lang : 'pt-PT';
+    utter.rate = opts.rate || 0.85; // mais lento por defeito
+    utter.pitch = 1;
+    window.speechSynthesis.speak(utter);
+    return true;
+  },
+  // Pre-carregar vozes (alguns browsers carregam async)
+  init() {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }
+};
+KbTTS.init();
+
+
+
+
+const STYLES = `
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Fraunces:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --kb-bg: #f5ede0;
+    --kb-bg-deep: #ebdcc4;
+    --kb-paper: #faf3e6;
+    --kb-ink: #2a1810;
+    --kb-ink-soft: #5a4838;
+    --kb-mute: #8a7a68;
+    --kb-accent: #b8451f;       /* terracota */
+    --kb-accent-deep: #8a2f12;
+    --kb-gold: #c89c4f;
+    --kb-forest: #3d4a2e;
+    --kb-forest-deep: #2b3520;
+    --kb-line: #d8c7a8;
+    --kb-line-soft: #e8dcc4;
+    --kb-correct: #5a7d3a;
+    --kb-wrong: #b8451f;
+    --kb-shadow: 0 2px 0 rgba(42, 24, 16, 0.05), 0 8px 24px -10px rgba(42, 24, 16, 0.15);
+    --kb-shadow-lift: 0 4px 0 rgba(42, 24, 16, 0.06), 0 16px 32px -12px rgba(42, 24, 16, 0.22);
+  }
+
+  .kb-app {
+    font-family: 'DM Sans', sans-serif;
+    color: var(--kb-ink);
+    background:
+      radial-gradient(ellipse at top left, rgba(200, 156, 79, 0.12), transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(184, 69, 31, 0.08), transparent 50%),
+      var(--kb-bg);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+
+  /* ---------- HEADER ---------- */
+  .kb-header {
+    border-bottom: 1px solid var(--kb-line);
+    background: var(--kb-paper);
+    padding: 1.25rem 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  @media (min-width: 900px) {
+    .kb-header { flex-direction: row; align-items: center; justify-content: space-between; }
+  }
+  .kb-brand { display: flex; align-items: center; gap: 1rem; cursor: pointer; }
+  .kb-brand-mark {
+    width: 48px; height: 48px;
+    background: var(--kb-accent);
+    color: var(--kb-paper);
+    font-family: 'Fraunces', serif;
+    font-weight: 800;
+    font-size: 1.8rem;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    transform: rotate(-3deg);
+    box-shadow: 3px 3px 0 var(--kb-forest);
+  }
+  .kb-brand-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 1.6rem;
+    margin: 0;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .kb-brand-sub {
+    font-size: 0.78rem;
+    color: var(--kb-mute);
+    margin: 0.25rem 0 0;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .kb-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .kb-nav-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 0.5rem 0.85rem;
+    color: var(--kb-ink-soft);
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 999px;
+    transition: all 0.15s;
+  }
+  .kb-nav-btn:hover {
+    color: var(--kb-accent);
+    background: rgba(184, 69, 31, 0.06);
+  }
+  .kb-nav-btn.active {
+    background: var(--kb-ink);
+    color: var(--kb-paper);
+  }
+
+  /* ---------- MAIN ---------- */
+  .kb-main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+  @media (min-width: 700px) {
+    .kb-main { padding: 3rem 2rem 5rem; }
+  }
+
+  .kb-page-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    letter-spacing: -0.02em;
+    margin: 0 0 0.5rem;
+  }
+  .kb-page-sub {
+    color: var(--kb-mute);
+    font-size: 0.95rem;
+    margin: 0 0 2rem;
+  }
+  .kb-section-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.4rem;
+    margin: 2rem 0 1rem;
+    letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 0.75rem;
+  }
+  .kb-section-title::before {
+    content: '';
+    width: 24px;
+    height: 2px;
+    background: var(--kb-accent);
+  }
+
+  /* ---------- HERO ---------- */
+  .kb-hero {
+    text-align: center;
+    padding: 3rem 1.5rem 2.5rem;
+    background: linear-gradient(180deg, var(--kb-paper), transparent);
+    border: 1px solid var(--kb-line);
+    border-radius: 8px;
+    margin-bottom: 2.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .kb-hero::before, .kb-hero::after {
+    content: '';
+    position: absolute;
+    width: 120px; height: 120px;
+    background: radial-gradient(circle, var(--kb-gold) 0%, transparent 60%);
+    opacity: 0.15;
+    border-radius: 50%;
+  }
+  .kb-hero::before { top: -40px; left: -40px; }
+  .kb-hero::after { bottom: -40px; right: -40px; }
+  .kb-hero-ornament {
+    color: var(--kb-gold);
+    letter-spacing: 1rem;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .kb-hero-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: clamp(2rem, 6vw, 3.5rem);
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.03em;
+    color: var(--kb-accent-deep);
+  }
+  .kb-hero-greet {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 1.3rem;
+    color: var(--kb-ink-soft);
+    margin: 0 0 0.5rem;
+  }
+  .kb-hero-sub {
+    font-size: 0.85rem;
+    color: var(--kb-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 0;
+  }
+
+  /* ---------- STATS ---------- */
+  .kb-stats {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+  @media (min-width: 700px) {
+    .kb-stats { grid-template-columns: repeat(3, 1fr); }
+  }
+  .kb-stat {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    padding: 1.5rem;
+    border-radius: 6px;
+    box-shadow: var(--kb-shadow);
+  }
+  .kb-stat-value {
+    font-family: 'Fraunces', serif;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--kb-accent);
+    line-height: 1;
+  }
+  .kb-stat-label {
+    font-size: 0.85rem;
+    color: var(--kb-ink-soft);
+    margin-top: 0.5rem;
+    font-weight: 500;
+  }
+  .kb-stat-pct {
+    font-size: 0.75rem;
+    color: var(--kb-mute);
+    margin-top: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .kb-bar {
+    height: 6px;
+    background: var(--kb-line-soft);
+    border-radius: 3px;
+    margin-top: 0.75rem;
+    overflow: hidden;
+  }
+  .kb-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--kb-accent), var(--kb-gold));
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+
+  /* ---------- QUICK CARDS ---------- */
+  .kb-quick { margin-bottom: 2.5rem; }
+  .kb-quick-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  @media (min-width: 600px) {
+    .kb-quick-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (min-width: 900px) {
+    .kb-quick-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  .kb-quick-card {
+    text-align: left;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    padding: 1.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+    position: relative;
+    transition: all 0.2s;
+    box-shadow: var(--kb-shadow);
+  }
+  .kb-quick-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--kb-shadow-lift);
+    border-color: var(--kb-accent);
+  }
+  .kb-quick-label {
+    font-family: 'Fraunces', serif;
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .kb-quick-desc {
+    font-size: 0.88rem;
+    color: var(--kb-ink-soft);
+    line-height: 1.45;
+  }
+  .kb-quick-arrow {
+    position: absolute;
+    top: 1rem;
+    right: 1.25rem;
+    color: var(--kb-accent);
+    font-size: 1.2rem;
+    transition: transform 0.2s;
+  }
+  .kb-quick-card:hover .kb-quick-arrow {
+    transform: translateX(4px);
+  }
+
+  /* ---------- AULAS MINI (home) ---------- */
+  .kb-aulas-mini {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  @media (min-width: 600px) {
+    .kb-aulas-mini { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (min-width: 900px) {
+    .kb-aulas-mini { grid-template-columns: repeat(3, 1fr); }
+  }
+  .kb-aula-mini {
+    text-align: left;
+    background: transparent;
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 0.85rem;
+    align-items: center;
+    transition: all 0.15s;
+  }
+  .kb-aula-mini:hover {
+    background: var(--kb-paper);
+    border-color: var(--kb-accent);
+  }
+  .kb-aula-num {
+    grid-row: span 2;
+    width: 32px; height: 32px;
+    background: var(--kb-forest);
+    color: var(--kb-paper);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .kb-aula-titulo { font-weight: 600; font-size: 0.92rem; }
+  .kb-aula-sub { color: var(--kb-mute); font-size: 0.78rem; }
+
+  /* ---------- AULAS GRID ---------- */
+  .kb-aulas-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.2rem;
+  }
+  @media (min-width: 600px) { .kb-aulas-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 900px) { .kb-aulas-grid { grid-template-columns: repeat(3, 1fr); } }
+  .kb-aula-card {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 6px;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: var(--kb-shadow);
+  }
+  .kb-aula-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--kb-shadow-lift);
+    border-color: var(--kb-accent);
+  }
+  .kb-aula-card-num {
+    display: inline-block;
+    font-family: 'Fraunces', serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--kb-accent);
+    margin-bottom: 0.75rem;
+  }
+  .kb-aula-card-titulo {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.3rem;
+    margin: 0 0 0.4rem;
+    letter-spacing: -0.01em;
+  }
+  .kb-aula-card-sub {
+    color: var(--kb-ink-soft);
+    font-size: 0.88rem;
+    margin: 0 0 1rem;
+  }
+  .kb-aula-card-meta {
+    font-size: 0.75rem;
+    color: var(--kb-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* ---------- AULA DETAIL ---------- */
+  .kb-back {
+    background: transparent;
+    border: none;
+    color: var(--kb-accent);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 1.5rem;
+  }
+  .kb-back:hover { text-decoration: underline; }
+  .kb-aula-header { margin-bottom: 2rem; }
+  .kb-aula-content {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 6px;
+    padding: 2rem;
+    box-shadow: var(--kb-shadow);
+  }
+  .kb-topics {
+    list-style: none;
+    counter-reset: topic;
+    padding: 0;
+    margin: 0;
+  }
+  .kb-topic {
+    counter-increment: topic;
+    padding: 1rem 0 1rem 3rem;
+    position: relative;
+    border-bottom: 1px solid var(--kb-line-soft);
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  .kb-topic:last-child { border-bottom: none; }
+  .kb-topic::before {
+    content: counter(topic, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 1rem;
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    color: var(--kb-gold);
+    font-size: 1.1rem;
+  }
+
+  /* ---------- CONTROLS ---------- */
+  .kb-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .kb-control-group { display: flex; flex-direction: column; gap: 0.35rem; }
+  .kb-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--kb-mute);
+    font-weight: 600;
+  }
+  .kb-input, .kb-select {
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 0.6rem 0.85rem;
+    border: 1px solid var(--kb-line);
+    background: var(--kb-paper);
+    color: var(--kb-ink);
+    border-radius: 4px;
+    min-width: 200px;
+  }
+  .kb-input:focus, .kb-select:focus {
+    outline: 2px solid var(--kb-accent);
+    outline-offset: -1px;
+  }
+  .kb-input { flex: 1; min-width: 260px; }
+
+  .kb-toggle {
+    display: inline-flex;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    padding: 3px;
+  }
+  .kb-toggle button {
+    background: transparent;
+    border: none;
+    padding: 0.45rem 0.85rem;
+    font-family: inherit;
+    font-size: 0.88rem;
+    color: var(--kb-ink-soft);
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .kb-toggle button.active {
+    background: var(--kb-ink);
+    color: var(--kb-paper);
+  }
+
+  /* ---------- BUTTONS ---------- */
+  .kb-btn {
+    font-family: inherit;
+    font-size: 0.92rem;
+    font-weight: 500;
+    padding: 0.65rem 1.1rem;
+    border: 1px solid var(--kb-line);
+    background: var(--kb-paper);
+    color: var(--kb-ink);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .kb-btn:hover { border-color: var(--kb-accent); color: var(--kb-accent); }
+  .kb-btn-primary {
+    background: var(--kb-accent);
+    color: var(--kb-paper);
+    border-color: var(--kb-accent);
+  }
+  .kb-btn-primary:hover {
+    background: var(--kb-accent-deep);
+    color: var(--kb-paper);
+    border-color: var(--kb-accent-deep);
+  }
+  .kb-btn-big { padding: 1rem 1.75rem; font-size: 1rem; }
+  .kb-btn-small { padding: 0.4rem 0.75rem; font-size: 0.82rem; }
+  .kb-btn-danger { background: var(--kb-wrong); color: var(--kb-paper); border-color: var(--kb-wrong); }
+
+  /* ---------- FLASHCARDS ---------- */
+  .kb-flashcard-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  .kb-flashcard-meta {
+    display: flex; gap: 0.75rem; align-items: center;
+    font-size: 0.85rem; color: var(--kb-mute);
+  }
+  .kb-tag {
+    background: var(--kb-forest);
+    color: var(--kb-paper);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+  .kb-tag-cat {
+    background: var(--kb-line-soft);
+    color: var(--kb-ink-soft);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+  }
+  .kb-flashcard {
+    width: 100%;
+    max-width: 520px;
+    aspect-ratio: 4 / 3;
+    perspective: 1500px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+  }
+  .kb-flashcard-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+    transform-style: preserve-3d;
+  }
+  .kb-flashcard.flipped .kb-flashcard-inner {
+    transform: rotateY(180deg);
+  }
+  .kb-flashcard-side {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    border-radius: 8px;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-shadow: var(--kb-shadow-lift);
+  }
+  .kb-flashcard-front {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+  }
+  .kb-flashcard-back {
+    background: var(--kb-forest);
+    color: var(--kb-paper);
+    transform: rotateY(180deg);
+  }
+  .kb-flashcard-hint {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--kb-mute);
+    margin-bottom: 1.5rem;
+  }
+  .kb-flashcard-back .kb-flashcard-hint { color: rgba(245, 237, 224, 0.6); }
+  .kb-flashcard-text {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  .kb-flashcard-tip {
+    margin-top: auto;
+    font-size: 0.78rem;
+    color: var(--kb-mute);
+    font-style: italic;
+  }
+  .kb-flashcard-back .kb-flashcard-tip { color: rgba(245, 237, 224, 0.5); }
+  .kb-flashcard-nav { display: flex; gap: 0.75rem; }
+
+  /* ---------- QUIZ ---------- */
+  .kb-quiz-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: var(--kb-mute);
+    margin-bottom: 0.75rem;
+  }
+  .kb-quiz-bar {
+    height: 4px;
+    background: var(--kb-line-soft);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+  }
+  .kb-quiz-bar-fill {
+    height: 100%;
+    background: var(--kb-accent);
+    transition: width 0.3s;
+  }
+  .kb-quiz-card {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 8px;
+    padding: 2.5rem 2rem;
+    box-shadow: var(--kb-shadow-lift);
+  }
+  .kb-quiz-hint {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--kb-mute);
+    text-align: center;
+    margin-bottom: 1rem;
+  }
+  .kb-quiz-prompt {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: clamp(1.6rem, 4.5vw, 2.4rem);
+    text-align: center;
+    margin-bottom: 2rem;
+    color: var(--kb-accent-deep);
+    letter-spacing: -0.02em;
+  }
+  .kb-quiz-options { display: flex; flex-direction: column; gap: 0.65rem; }
+  .kb-quiz-option {
+    font-family: inherit;
+    font-size: 0.98rem;
+    text-align: left;
+    padding: 1rem 1.2rem;
+    border: 1px solid var(--kb-line);
+    background: var(--kb-bg);
+    color: var(--kb-ink);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .kb-quiz-option:hover:not(.disabled) {
+    border-color: var(--kb-accent);
+    transform: translateX(4px);
+  }
+  .kb-quiz-option.correct {
+    background: var(--kb-correct);
+    color: var(--kb-paper);
+    border-color: var(--kb-correct);
+  }
+  .kb-quiz-option.wrong {
+    background: var(--kb-wrong);
+    color: var(--kb-paper);
+    border-color: var(--kb-wrong);
+  }
+  .kb-quiz-option.disabled { cursor: default; }
+  .kb-feedback {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 500;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .kb-feedback.correct { background: rgba(90, 125, 58, 0.12); color: var(--kb-correct); }
+  .kb-feedback.wrong { background: rgba(184, 69, 31, 0.1); color: var(--kb-accent-deep); }
+  .kb-quiz-done {
+    text-align: center;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 8px;
+    padding: 3rem 2rem;
+    box-shadow: var(--kb-shadow-lift);
+  }
+  .kb-result-score {
+    font-family: 'Fraunces', serif;
+    font-size: clamp(4rem, 12vw, 6rem);
+    font-weight: 700;
+    color: var(--kb-accent);
+    line-height: 1;
+  }
+  .kb-result-score span {
+    color: var(--kb-mute);
+    font-size: 0.5em;
+    font-weight: 400;
+  }
+  .kb-result-pct { font-size: 1.4rem; color: var(--kb-ink-soft); margin: 0.5rem 0 1.5rem; }
+  .kb-result-msg { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.2rem; margin-bottom: 2rem; }
+  .kb-quiz-done .kb-btn { margin: 0 0.25rem; }
+
+  /* ---------- DICIONÁRIO ---------- */
+  .kb-dic-count {
+    font-size: 0.85rem;
+    color: var(--kb-mute);
+    margin-bottom: 1rem;
+  }
+  .kb-dic-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  @media (min-width: 600px) { .kb-dic-list { grid-template-columns: repeat(2, 1fr); } }
+  .kb-dic-item {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    column-gap: 1rem;
+    align-items: center;
+  }
+  .kb-dic-kb {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--kb-accent-deep);
+  }
+  .kb-dic-pt {
+    font-size: 0.92rem;
+    color: var(--kb-ink-soft);
+    grid-column: 1;
+  }
+  .kb-dic-cat {
+    grid-row: span 2;
+    background: var(--kb-line-soft);
+    color: var(--kb-ink-soft);
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .kb-empty { text-align: center; padding: 3rem; color: var(--kb-mute); grid-column: 1 / -1; }
+
+  /* ---------- VERBOS ---------- */
+  .kb-table-wrap { overflow-x: auto; }
+  .kb-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 0.92rem;
+  }
+  .kb-table th, .kb-table td {
+    padding: 0.7rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--kb-line-soft);
+  }
+  .kb-table th {
+    background: var(--kb-forest);
+    color: var(--kb-paper);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.8rem;
+  }
+  .kb-table tr:last-child td { border-bottom: none; }
+  .kb-td-pron { font-family: 'Fraunces', serif; font-weight: 600; color: var(--kb-accent); }
+
+  .kb-verbos-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  @media (min-width: 500px) { .kb-verbos-list { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 800px) { .kb-verbos-list { grid-template-columns: repeat(3, 1fr); } }
+  .kb-verbo-chip {
+    text-align: left;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    padding: 0.7rem 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex; flex-direction: column;
+    color: var(--kb-ink);
+  }
+  .kb-verbo-chip:hover:not(:disabled) {
+    border-color: var(--kb-accent);
+  }
+  .kb-verbo-chip.active {
+    background: var(--kb-accent);
+    color: var(--kb-paper);
+    border-color: var(--kb-accent);
+  }
+  .kb-verbo-chip.active .kb-verbo-pt { color: rgba(245, 237, 224, 0.8); }
+  .kb-verbo-chip:disabled { opacity: 0.55; cursor: not-allowed; }
+  .kb-verbo-inf { font-family: 'Fraunces', serif; font-weight: 600; font-size: 0.95rem; }
+  .kb-verbo-pt { font-size: 0.8rem; color: var(--kb-mute); margin-top: 0.15rem; }
+
+  .kb-conj-detail {
+    margin-top: 2rem;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 6px;
+    padding: 1.5rem;
+    box-shadow: var(--kb-shadow);
+  }
+  .kb-conj-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    margin-top: 1rem;
+  }
+  @media (min-width: 700px) { .kb-conj-grid { grid-template-columns: repeat(3, 1fr); } }
+  .kb-conj-tempo h4 {
+    font-family: 'Fraunces', serif;
+    font-size: 1.1rem;
+    color: var(--kb-accent);
+    border-bottom: 2px solid var(--kb-accent);
+    padding-bottom: 0.4rem;
+    margin: 0 0 0.75rem;
+  }
+  .kb-conj-tempo ul { list-style: none; padding: 0; margin: 0; }
+  .kb-conj-tempo li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.45rem 0;
+    border-bottom: 1px dashed var(--kb-line-soft);
+    gap: 0.75rem;
+  }
+  .kb-conj-tempo li:last-child { border-bottom: none; }
+  .kb-conj-tempo strong { font-family: 'Fraunces', serif; color: var(--kb-ink-soft); font-weight: 500; font-size: 0.92rem; }
+  .kb-conj-tempo span { font-weight: 600; text-align: right; }
+
+  /* ---------- FRASES ---------- */
+  .kb-frases-topic { margin-bottom: 2rem; }
+  .kb-frases-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .kb-frase-item {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  @media (min-width: 600px) {
+    .kb-frase-item { flex-direction: row; align-items: center; justify-content: space-between; }
+  }
+  .kb-frase-kb {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--kb-accent-deep);
+    flex: 1;
+  }
+  .kb-frase-toggle {
+    background: transparent;
+    border: 1px solid var(--kb-line);
+    padding: 0.4rem 0.85rem;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.88rem;
+    color: var(--kb-ink-soft);
+    cursor: pointer;
+    text-align: left;
+  }
+  .kb-frase-toggle:hover { border-color: var(--kb-accent); color: var(--kb-accent); }
+
+  /* ---------- TREINO ---------- */
+  .kb-treino-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 1.5rem;
+  }
+  .kb-treino-item {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 1rem;
+    align-items: center;
+  }
+  .kb-treino-num {
+    width: 28px; height: 28px;
+    background: var(--kb-forest);
+    color: var(--kb-paper);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .kb-treino-kb {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--kb-accent-deep);
+  }
+  .kb-treino-pt {
+    font-size: 0.95rem;
+    color: var(--kb-ink-soft);
+    font-style: italic;
+    text-align: right;
+  }
+
+  /* ---------- PROGRESSO ---------- */
+  .kb-quiz-history {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+  .kb-quiz-history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 1rem;
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 4px;
+    font-size: 0.88rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .kb-quiz-history-score {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    color: var(--kb-accent);
+  }
+  .kb-confirm {
+    background: rgba(184, 69, 31, 0.08);
+    border: 1px solid var(--kb-wrong);
+    border-radius: 4px;
+    padding: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+  }
+  .kb-confirm p { margin: 0 0.5rem 0 0; flex: 1; min-width: 200px; }
+
+
+  /* ---------- MODAL ---------- */
+  .kb-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(42, 24, 16, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .kb-modal {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 8px;
+    padding: 2.5rem 2rem;
+    max-width: 420px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 60px -10px rgba(42, 24, 16, 0.4);
+    animation: kb-modal-in 0.3s ease-out;
+  }
+  @keyframes kb-modal-in {
+    from { opacity: 0; transform: translateY(20px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .kb-modal-ornament {
+    color: var(--kb-gold);
+    letter-spacing: 1rem;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .kb-modal-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 2.2rem;
+    color: var(--kb-accent-deep);
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+  .kb-modal-sub {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 1.15rem;
+    color: var(--kb-ink-soft);
+    margin: 0.5rem 0 0;
+  }
+
+  /* ---------- IDADE TRADUTOR ---------- */
+  .kb-idade-box {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 2.5rem;
+    box-shadow: var(--kb-shadow);
+  }
+  .kb-idade-box .kb-section-title {
+    margin-top: 0;
+  }
+  .kb-idade-result {
+    margin-top: 1.25rem;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(135deg, rgba(184, 69, 31, 0.06), rgba(200, 156, 79, 0.08));
+    border-left: 3px solid var(--kb-accent);
+    border-radius: 4px;
+  }
+  .kb-idade-pt {
+    color: var(--kb-ink-soft);
+    margin-bottom: 0.4rem;
+    font-size: 0.95rem;
+  }
+  .kb-idade-kb {
+    font-family: 'Fraunces', serif;
+    font-size: 1.15rem;
+    color: var(--kb-accent-deep);
+    line-height: 1.4;
+  }
+  .kb-idade-kb strong {
+    color: var(--kb-accent);
+    font-weight: 700;
+  }
+  .kb-idade-pt strong {
+    color: var(--kb-ink);
+    font-weight: 600;
+  }
+
+  /* ---------- CHANGE NAME ---------- */
+  .kb-change-name {
+    margin-top: 1rem;
+    background: transparent;
+    border: none;
+    color: var(--kb-mute);
+    font-family: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 3px;
+  }
+  .kb-change-name:hover {
+    color: var(--kb-accent);
+  }
+
+
+  /* ---------- TTS NOTICE (banner no Hero) ---------- */
+  .kb-tts-notice {
+    margin: 1.5rem auto 0;
+    max-width: 580px;
+    background: rgba(200, 156, 79, 0.12);
+    border: 1px solid rgba(200, 156, 79, 0.35);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 0.82rem;
+    color: var(--kb-ink-soft);
+    text-align: left;
+    line-height: 1.45;
+    display: flex;
+    gap: 0.65rem;
+    align-items: flex-start;
+  }
+  .kb-tts-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+  .kb-tts-notice strong {
+    color: var(--kb-accent-deep);
+  }
+
+  /* ---------- SPEAK BUTTON ---------- */
+  .kb-speak {
+    background: var(--kb-paper);
+    border: 1px solid var(--kb-line);
+    color: var(--kb-accent);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .kb-speak:hover {
+    background: var(--kb-accent);
+    color: var(--kb-paper);
+    border-color: var(--kb-accent);
+    transform: scale(1.05);
+  }
+  .kb-speak.speaking {
+    background: var(--kb-accent);
+    color: var(--kb-paper);
+    border-color: var(--kb-accent);
+    animation: kb-pulse 0.8s ease-in-out infinite;
+  }
+  @keyframes kb-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.12); }
+  }
+  .kb-speak-small {
+    width: 24px;
+    height: 24px;
+  }
+  .kb-speak-small svg { width: 12px; height: 12px; }
+  .kb-speak-big {
+    width: 44px;
+    height: 44px;
+  }
+  .kb-speak-big svg { width: 20px; height: 20px; }
+
+  /* Speak na frente do flashcard */
+  .kb-flashcard-speak {
+    margin-top: 1rem;
+  }
+  .kb-flashcard-back .kb-speak {
+    background: rgba(245, 237, 224, 0.15);
+    color: var(--kb-paper);
+    border-color: rgba(245, 237, 224, 0.3);
+  }
+  .kb-flashcard-back .kb-speak:hover {
+    background: var(--kb-paper);
+    color: var(--kb-forest);
+  }
+
+  /* Speak no dicionário */
+  .kb-dic-kb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .kb-dic-kb span { flex: 1; }
+
+  /* Speak nas frases */
+  .kb-frase-kb {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .kb-frase-kb span { flex: 1; }
+
+  /* Speak no treino */
+  .kb-treino-kb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .kb-treino-kb span { flex: 1; }
+
+  /* Speak no quiz prompt */
+  .kb-quiz-prompt {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  /* Speak no idade tradutor */
+  .kb-idade-kb {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  /* ---------- Secção de pronúncia nas Aulas ---------- */
+  .kb-aula-pronun {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(200, 156, 79, 0.08), rgba(184, 69, 31, 0.04));
+    border: 1px solid var(--kb-gold);
+    border-radius: 6px;
+  }
+  .kb-aula-pronun h4 {
+    font-family: 'Fraunces', serif;
+    font-size: 1.15rem;
+    color: var(--kb-accent-deep);
+    margin: 0 0 1rem;
+  }
+  .kb-aula-pronun ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .kb-aula-pronun li {
+    padding: 0.6rem 0;
+    border-bottom: 1px dashed rgba(200, 156, 79, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+  .kb-aula-pronun li:last-child { border-bottom: none; }
+  .kb-aula-pronun strong { color: var(--kb-accent); }
+  .kb-aula-pronun em { font-style: italic; font-family: 'Fraunces', serif; }
+  .kb-aula-pronun-note {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--kb-line-soft);
+    font-size: 0.78rem;
+    color: var(--kb-mute);
+    line-height: 1.5;
+    font-style: italic;
+  }
+
+  /* ---------- FOOTER ---------- */
+  .kb-footer {
+    text-align: center;
+    padding: 2rem;
+    border-top: 1px solid var(--kb-line);
+    color: var(--kb-mute);
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 1.05rem;
+  }
+`;
+
+// ============================================================
+// DADOS DAS AULAS - extraídos dos PDFs do Odacil
+// ============================================================
+
+const VOCAB = {
+  saudacoes: [
+    { kb: "Umenekenu / Kimene", pt: "Bom dia (manhã)", cat: "saudação" },
+    { kb: "Wa mu nanga kyebi?", pt: "Como estás a passar o dia? (tarde)", cat: "saudação" },
+    { kb: "Wala kyebhi?", pt: "Como estás?", cat: "saudação" },
+    { kb: "Eme ngala kyambote", pt: "Estou bem", cat: "saudação" },
+    { kb: "Eye wazekele kyebhi?", pt: "Como dormiste?", cat: "saudação" },
+    { kb: "Eme ngazekele kyambote", pt: "Dormi bem", cat: "saudação" },
+    { kb: "Ngoloxyoyo", pt: "Boa noite (a 1 pessoa)", cat: "saudação" },
+    { kb: "Ngoloxyenu", pt: "Boa noite (a 2+ pessoas)", cat: "saudação" },
+    { kb: "Mungu wé", pt: "Até amanhã (singular)", cat: "saudação" },
+    { kb: "Mungu wenu", pt: "Até amanhã (plural)", cat: "saudação" },
+    { kb: "Zeka kyambote", pt: "Dorme bem", cat: "saudação" },
+    { kb: "Xala kyambote", pt: "Fica bem", cat: "saudação" },
+    { kb: "Kudilekela", pt: "Despedida", cat: "saudação" },
+    { kb: "Tanaku!", pt: "Bem-vindo!", cat: "saudação" },
+    { kb: "Tanakwenu!", pt: "Bem-vindos!", cat: "saudação" },
+    { kb: "Ngasakidila", pt: "Obrigado", cat: "saudação" },
+    { kb: "Twasakidila", pt: "Agradecemos", cat: "saudação" },
+    { kb: "Bixila!", pt: "Chegue bem!", cat: "saudação" },
+    { kb: "Nde ni Nzambi", pt: "Vá com Deus", cat: "saudação" },
+    { kb: "Dijina dyé nanyi?", pt: "Qual é o teu nome?", cat: "saudação" },
+    { kb: "Dijina dyami…", pt: "O meu nome é…", cat: "saudação" },
+  ],
+  numeros: [
+    { kb: "Hatu", pt: "0", cat: "número" },
+    { kb: "Moxi", pt: "1", cat: "número" },
+    { kb: "Yadi", pt: "2", cat: "número" },
+    { kb: "Tatu", pt: "3", cat: "número" },
+    { kb: "Wana", pt: "4", cat: "número" },
+    { kb: "Tanu", pt: "5", cat: "número" },
+    { kb: "Samanu", pt: "6", cat: "número" },
+    { kb: "Sambwadi", pt: "7", cat: "número" },
+    { kb: "Dinake / Nake", pt: "8", cat: "número" },
+    { kb: "Divwa / Vwa", pt: "9", cat: "número" },
+    { kb: "Dikwinyi / Kwinyi", pt: "10", cat: "número" },
+    { kb: "Makwinyi yadi", pt: "20", cat: "número" },
+    { kb: "Makwinyi wana", pt: "40", cat: "número" },
+  ],
+  familia: [
+    { kb: "Mama", pt: "Mãe", cat: "família" },
+    { kb: "Tata", pt: "Pai", cat: "família" },
+    { kb: "Mona dyala", pt: "Filho", cat: "família" },
+    { kb: "Mona muhatu", pt: "Filha", cat: "família" },
+    { kb: "Ana", pt: "Filhos", cat: "família" },
+    { kb: "Phange ya dyala", pt: "Irmão", cat: "família" },
+    { kb: "Phange ya muhatu", pt: "Irmã", cat: "família" },
+    { kb: "Kuku ya dyala", pt: "Avô", cat: "família" },
+    { kb: "Kuku ya muhatu", pt: "Avó", cat: "família" },
+    { kb: "Mulume", pt: "Esposo", cat: "família" },
+    { kb: "Mukaji", pt: "Esposa", cat: "família" },
+    { kb: "Sekaji", pt: "Tia", cat: "família" },
+    { kb: "Sekulu", pt: "Tio", cat: "família" },
+    { kb: "Mwebhu wa muhatu", pt: "Sobrinha", cat: "família" },
+    { kb: "Mwebhu wa dyala", pt: "Sobrinho", cat: "família" },
+    { kb: "Mulawla", pt: "Neto/Neta", cat: "família" },
+    { kb: "Mwíji / Míji", pt: "Família / Famílias", cat: "família" },
+    { kb: "Divúmu", pt: "Barriga / Família (sentido fig.)", cat: "família" },
+    { kb: "Jindandu", pt: "Parentes", cat: "família" },
+    { kb: "Dyala", pt: "Homem", cat: "família" },
+    { kb: "Muhatu", pt: "Mulher", cat: "família" },
+  ],
+  corpo: [
+    { kb: "Mukutu wa muthu", pt: "Corpo humano", cat: "corpo" },
+    { kb: "Mûtwe", pt: "Cabeça", cat: "corpo" },
+    { kb: "Disu", pt: "Olho", cat: "corpo" },
+    { kb: "Dimi", pt: "Língua (órgão)", cat: "corpo" },
+    { kb: "Dikanu", pt: "Boca", cat: "corpo" },
+    { kb: "Diju / Dizu / Riju", pt: "Dente", cat: "corpo" },
+    { kb: "Muzumbu", pt: "Lábio", cat: "corpo" },
+    { kb: "Dizunu", pt: "Nariz", cat: "corpo" },
+    { kb: "Ditwi", pt: "Orelha", cat: "corpo" },
+    { kb: "Divúmu", pt: "Barriga", cat: "corpo" },
+    { kb: "Thulu", pt: "Peito", cat: "corpo" },
+    { kb: "Muxima", pt: "Coração", cat: "corpo" },
+    { kb: "Xingu", pt: "Pescoço", cat: "corpo" },
+    { kb: "Ngandélu", pt: "Queixo", cat: "corpo" },
+    { kb: "Lukwaku", pt: "Braço", cat: "corpo" },
+    { kb: "Mulembu", pt: "Dedo", cat: "corpo" },
+    { kb: "Kyala", pt: "Unha", cat: "corpo" },
+    { kb: "Kipuna", pt: "Cotovelo", cat: "corpo" },
+    { kb: "Kináma", pt: "Perna / Pé", cat: "corpo" },
+    { kb: "Ditakataka", pt: "Coxa", cat: "corpo" },
+    { kb: "Kipumuna", pt: "Joelho", cat: "corpo" },
+    { kb: "Ditaku", pt: "Nádega", cat: "corpo" },
+    { kb: "Ndemba", pt: "Cabelo", cat: "corpo" },
+    { kb: "Mwézu", pt: "Barba", cat: "corpo" },
+    { kb: "Kipepetela", pt: "Pestana", cat: "corpo" },
+  ],
+  tempo: [
+    { kb: "Kizuwa / Izuwa", pt: "Dia / Dias", cat: "tempo" },
+    { kb: "Sóna / Jisóna", pt: "Semana / Semanas", cat: "tempo" },
+    { kb: "Mbeji", pt: "Mês / Lua", cat: "tempo" },
+    { kb: "Muvu", pt: "Ano", cat: "tempo" },
+    { kb: "Lelu", pt: "Hoje", cat: "tempo" },
+    { kb: "Mâza", pt: "Ontem", cat: "tempo" },
+    { kb: "Mazadiná", pt: "Anteontem", cat: "tempo" },
+    { kb: "Mazadinaku", pt: "Há 3 dias", cat: "tempo" },
+    { kb: "Mungu", pt: "Amanhã", cat: "tempo" },
+    { kb: "Mungudiná", pt: "Depois de amanhã", cat: "tempo" },
+    { kb: "Mungudinaku", pt: "Daqui a 3 dias", cat: "tempo" },
+    { kb: "Kimene", pt: "Manhã", cat: "tempo" },
+    { kb: "Ngoloxi", pt: "Tarde", cat: "tempo" },
+    { kb: "Usuku", pt: "Noite", cat: "tempo" },
+    { kb: "Kindala / Kindawla", pt: "Agora", cat: "tempo" },
+    { kb: "Dikumbi", pt: "Sol", cat: "natureza" },
+    { kb: "Dyulu", pt: "Céu", cat: "natureza" },
+    { kb: "Tetembwa", pt: "Estrela", cat: "natureza" },
+    { kb: "Mbámbi", pt: "Frio", cat: "natureza" },
+    { kb: "Mbânze", pt: "Verão", cat: "natureza" },
+    { kb: "Mvula / Nvula", pt: "Chuva", cat: "natureza" },
+  ],
+  comidaBebida: [
+    { kb: "Kúdya", pt: "Comer / Comida", cat: "comida" },
+    { kb: "Kúnwa", pt: "Beber", cat: "comida" },
+    { kb: "Funji", pt: "Massa de farinha de milho/mandioca", cat: "comida" },
+    { kb: "Disa", pt: "Milho", cat: "comida" },
+    { kb: "Mbombó", pt: "Mandioca p/ fuba", cat: "comida" },
+    { kb: "Fuba", pt: "Farinha (para funji)", cat: "comida" },
+    { kb: "Xitu", pt: "Carne", cat: "comida" },
+    { kb: "Mwamba", pt: "Molho de amendoim/dendém", cat: "comida" },
+    { kb: "Mbiji", pt: "Peixe", cat: "comida" },
+    { kb: "Jinguba", pt: "Amendoim", cat: "comida" },
+    { kb: "Maji", pt: "Óleo / Azeite", cat: "comida" },
+    { kb: "Wálwa", pt: "Bebida alcoólica", cat: "bebida" },
+    { kb: "Kisângwa", pt: "Sumo", cat: "bebida" },
+    { kb: "Muzongé", pt: "Caldo", cat: "bebida" },
+    { kb: "Wiki", pt: "Mel", cat: "comida" },
+    { kb: "Sukidi", pt: "Açúcar", cat: "comida" },
+    { kb: "Menya", pt: "Água", cat: "bebida" },
+    { kb: "Mwênge", pt: "Cana-de-açúcar", cat: "comida" },
+    { kb: "Dihonjo / Mihonjo", pt: "Banana / Bananas", cat: "comida" },
+    { kb: "Múkwa", pt: "Fruto do embondeiro", cat: "comida" },
+    { kb: "Maboke", pt: "Fruta", cat: "comida" },
+    { kb: "Makunde", pt: "Feijão", cat: "comida" },
+    { kb: "Lwoso", pt: "Arroz", cat: "comida" },
+    { kb: "Múngwa / Móngwa", pt: "Sal", cat: "comida" },
+  ],
+  animais: [
+    { kb: "Yama", pt: "Animais", cat: "animal" },
+    { kb: "Nzamba", pt: "Elefante", cat: "animal" },
+    { kb: "Hoji", pt: "Leão", cat: "animal" },
+    { kb: "Íngo", pt: "Onça", cat: "animal" },
+    { kb: "Palanga", pt: "Palanca", cat: "animal" },
+    { kb: "Ngûvu", pt: "Hipopótamo", cat: "animal" },
+    { kb: "Ngandu", pt: "Crocodilo", cat: "animal" },
+    { kb: "Imbwa", pt: "Cão", cat: "animal" },
+    { kb: "Mungwalaxi", pt: "Gato", cat: "animal" },
+    { kb: "Ngombe", pt: "Boi / Vaca", cat: "animal" },
+    { kb: "Ngúlu", pt: "Porco", cat: "animal" },
+    { kb: "Hombo", pt: "Cabrito", cat: "animal" },
+    { kb: "Sanji", pt: "Galinha", cat: "animal" },
+    { kb: "Njila", pt: "Pássaro", cat: "animal" },
+    { kb: "Nzówe", pt: "Pato", cat: "animal" },
+    { kb: "Nyoki / Nyiki", pt: "Abelha", cat: "animal" },
+    { kb: "Hamwa", pt: "Mosquito", cat: "animal" },
+    { kb: "Inji", pt: "Mosca", cat: "animal" },
+    { kb: "Nyoka", pt: "Cobra", cat: "animal" },
+    { kb: "Dinongwena", pt: "Camaleão", cat: "animal" },
+    { kb: "Disalala", pt: "Centopeia", cat: "animal" },
+    { kb: "Pakása", pt: "Búfalo", cat: "animal" },
+  ],
+  cores: [
+    { kb: "Makowa", pt: "Cores", cat: "cor" },
+    { kb: "Utokwa", pt: "Cinzento", cat: "cor" },
+    { kb: "Pembe", pt: "Amarelo", cat: "cor" },
+    { kb: "Kusuka", pt: "Vermelho", cat: "cor" },
+    { kb: "Kyadyulu", pt: "Azul", cat: "cor" },
+    { kb: "Wisu", pt: "Verde", cat: "cor" },
+    { kb: "Zela", pt: "Branco", cat: "cor" },
+    { kb: "Xikelela", pt: "Preto", cat: "cor" },
+    { kb: "Mbundu", pt: "Pessoa negra", cat: "cultura" },
+    { kb: "Mundele", pt: "Pessoa branca", cat: "cultura" },
+  ],
+  pronomes: [
+    { kb: "Eme", pt: "Eu", cat: "pronome" },
+    { kb: "Eye", pt: "Tu / Você", cat: "pronome" },
+    { kb: "Mwene", pt: "Ele / Ela", cat: "pronome" },
+    { kb: "Etu / Esu", pt: "Nós", cat: "pronome" },
+    { kb: "Enu", pt: "Vós / Vocês", cat: "pronome" },
+    { kb: "Ene", pt: "Eles / Elas", cat: "pronome" },
+  ],
+  outras: [
+    { kb: "Inzo / Dibata", pt: "Casa", cat: "lugar" },
+    { kb: "Ixi", pt: "Terra / País", cat: "lugar" },
+    { kb: "Muxi", pt: "Árvore / Madeira", cat: "natureza" },
+    { kb: "Ngiji", pt: "Rio", cat: "lugar" },
+    { kb: "Mulundu", pt: "Montanha", cat: "lugar" },
+    { kb: "Muxitu", pt: "Floresta", cat: "lugar" },
+    { kb: "Kitadi", pt: "Dinheiro", cat: "objeto" },
+    { kb: "Yalu", pt: "Cadeira", cat: "objeto" },
+    { kb: "Dilonga", pt: "Prato", cat: "objeto" },
+    { kb: "Ngoma / Jingoma", pt: "Batuque / Batuques", cat: "objeto" },
+    { kb: "Dyaki / Mayaki", pt: "Ovo / Ovos", cat: "comida" },
+    { kb: "Athu / Muthu", pt: "Pessoas / Pessoa", cat: "geral" },
+    { kb: "Kamba / Makamba", pt: "Amigo / Amigos", cat: "geral" },
+    { kb: "Nzambi", pt: "Deus", cat: "cultura" },
+    { kb: "Mulongexi", pt: "Professor", cat: "profissão" },
+    { kb: "Mulambi", pt: "Cozinheiro", cat: "profissão" },
+    { kb: "Mukongo", pt: "Caçador", cat: "profissão" },
+    { kb: "Mudilongi", pt: "Aluno", cat: "profissão" },
+    { kb: "Musumbi", pt: "Comprador", cat: "profissão" },
+    { kb: "Mbolo", pt: "Pão", cat: "comida" },
+    { kb: "Mahina", pt: "Leite", cat: "comida" },
+    { kb: "Ndungu", pt: "Pimenta", cat: "comida" },
+    { kb: "Kidi", pt: "Verdade", cat: "geral" },
+    { kb: "Kituxi", pt: "Mal / Erro", cat: "geral" },
+    { kb: "Henda / Jihenda", pt: "Saudade(s)", cat: "geral" },
+    { kb: "Maka", pt: "Problemas / Palavras", cat: "geral" },
+    { kb: "Nguma", pt: "Inimigo", cat: "geral" },
+    { kb: "Bwé", pt: "Muito (Bué)", cat: "influência" },
+    { kb: "Kúya", pt: "Ir (Cúia)", cat: "influência" },
+    { kb: "Kuxinga", pt: "Ofender (xingar)", cat: "influência" },
+    { kb: "Mbunda", pt: "Traseiro (Bunda)", cat: "influência" },
+    { kb: "Nganza", pt: "Embriaguez (Ganza)", cat: "influência" },
+    { kb: "Kwibula", pt: "Procurar saber (Cábula)", cat: "influência" },
+  ],
+};
+
+const ALL_VOCAB = Object.values(VOCAB).flat();
+
+// ============================================================
+// VERBOS - Aula 4 e 8
+// ============================================================
+const VERBOS = [
+  { inf: "Kukala", pt: "Estar" },
+  { inf: "Kubanza", pt: "Pensar" },
+  { inf: "Kuzeka", pt: "Dormir" },
+  { inf: "Kúdya", pt: "Comer" },
+  { inf: "Kúnwa", pt: "Beber" },
+  { inf: "Kúya", pt: "Ir" },
+  { inf: "Kubokona", pt: "Entrar" },
+  { inf: "Kúzembela", pt: "Odiar" },
+  { inf: "Kudikola", pt: "Clamar por ajuda" },
+  { inf: "Kwabudisa", pt: "Perguntar" },
+  { inf: "Kudibanga", pt: "Fazer-se" },
+  { inf: "Kudikata", pt: "Adoecer" },
+  { inf: "Kuzuka", pt: "Aproximar" },
+  { inf: "Kumateka", pt: "Começar" },
+  { inf: "Kukayela", pt: "Seguir" },
+  { inf: "Kutumisa", pt: "Mandar" },
+  { inf: "Kudikisa", pt: "Mostrar" },
+  { inf: "Kudidika", pt: "Arranjar" },
+  { inf: "Kulumata", pt: "Morder" },
+  { inf: "Kusumba", pt: "Comprar" },
+  { inf: "Kusumbisa", pt: "Vender" },
+  { inf: "Kukalakala", pt: "Trabalhar" },
+  { inf: "Kusamba", pt: "Orar" },
+  { inf: "Kwimba", pt: "Cantar" },
+  { inf: "Kuxana", pt: "Chamar" },
+  { inf: "Kubana", pt: "Dar" },
+  { inf: "Kusota", pt: "Procurar" },
+];
+
+const CONJ_PRESENTE = {
+  Eme: "ngi-", Eye: "u-", Mwene: "u-",
+  Etu: "tu-", Enu: "nu- / mu-", Ene: "a-"
+};
+const CONJ_PASSADO = {
+  Eme: "nga-", Eye: "wa-", Mwene: "wa-",
+  Etu: "twa-", Enu: "nwa- / mwa-", Ene: "a-"
+};
+const CONJ_FUTURO = {
+  Eme: "ngondo / ngando", Eye: "wondo / wando", Mwene: "wondo / wando",
+  Etu: "twondo / twando", Enu: "nwondo / mwondo", Ene: "ondo / ando"
+};
+
+// Conjugações específicas (verbos irregulares ou exemplares das aulas)
+const CONJ_EXEMPLOS = {
+  Kukala: {
+    presente: { Eme: "Ngala", Eye: "Wala", Mwene: "Wala", Etu: "Twala", Enu: "Nwala / Mwala", Ene: "Ala" },
+    passado: { Eme: "Ngexile / Ngakexile", Eye: "Wexile / Wakexile", Mwene: "Wexile / Wakexile", Etu: "Twexile / Twakexile", Enu: "Nwexile / Mwexile", Ene: "Exile / Akexile" },
+    futuro: { Eme: "Ngondo kala", Eye: "Wondo kala", Mwene: "Wondo kala", Etu: "Twondo kala", Enu: "Nwondo / Mwondo kala", Ene: "Ondo kala" }
+  },
+  Kubanza: {
+    presente: { Eme: "Ngibanza", Eye: "Ubanza", Mwene: "Ubanza", Etu: "Tubanza", Enu: "Nwabanza / Mwabanza", Ene: "Abanza" },
+    passado: { Eme: "Ngabanze", Eye: "Wabanze", Mwene: "Wabanze", Etu: "Twabanze", Enu: "Nwabanze", Ene: "Abanze" },
+    futuro: { Eme: "Ngondo banza", Eye: "Wondo banza", Mwene: "Wondo banza", Etu: "Twondo banza", Enu: "Nwondo / Mwondo banza", Ene: "Ondo banza" }
+  },
+  Kuzeka: {
+    presente: { Eme: "Ngizeka", Eye: "Uzeka", Mwene: "Uzeka", Etu: "Tuzeka", Enu: "Nwazeka", Ene: "Azeka" },
+    passado: { Eme: "Ngazekele", Eye: "Wazekele", Mwene: "Wazekele", Etu: "Twazekele", Enu: "Nwazekele / Mwazekele", Ene: "Azekele" },
+    futuro: { Eme: "Ngondo zeka", Eye: "Wondo zeka", Mwene: "Wondo zeka", Etu: "Twondo zeka", Enu: "Nwondo / Mwondo zeka", Ene: "Ondo zeka" }
+  }
+};
+
+// ============================================================
+// FRASES ÚTEIS (frases de exemplo das aulas)
+// ============================================================
+const FRASES = [
+  { kb: "Dijina dyé nanyi?", pt: "Qual é o teu nome?", topic: "Apresentação" },
+  { kb: "Dijina dyami Odacil.", pt: "O meu nome é Odacil.", topic: "Apresentação" },
+  { kb: "Eye wala ni mivu ikuxi?", pt: "Que idade tens?", topic: "Apresentação" },
+  { kb: "Eme ngala kya ni makwinyi yadi ni tanu mivu!", pt: "Tenho 25 anos!", topic: "Apresentação" },
+  { kb: "Dibata dyé kwebi?", pt: "De onde és?", topic: "Apresentação" },
+  { kb: "Dibata dyami mu Katete.", pt: "Sou de Katete.", topic: "Apresentação" },
+  { kb: "Eye wa mu kalakala kwebi?", pt: "Onde trabalhas?", topic: "Apresentação" },
+  { kb: "Eye wala ni ana ikuxi?", pt: "Quantos filhos tens?", topic: "Apresentação" },
+  { kb: "Wolo ya kwebi?", pt: "Aonde vais? (Luanda)", topic: "Perguntas" },
+  { kb: "Inyi wolo banga?", pt: "O que estás a fazer?", topic: "Perguntas" },
+  { kb: "Wala kwebi?", pt: "Onde estás?", topic: "Perguntas" },
+  { kb: "Nga-ku-menekena!", pt: "Saúdo-te!", topic: "Saudações" },
+  { kb: "Twondo disanga dingi.", pt: "Voltaremos a encontrar-nos.", topic: "Despedidas" },
+  { kb: "Ku bata dyami túdya funji izuwa yoso.", pt: "Em minha casa comemos funji todos os dias.", topic: "Quotidiano" },
+  { kb: "Lelu twondo dya mwamba wa jinguba ni funji.", pt: "Hoje comeremos muamba de amendoim com funji.", topic: "Quotidiano" },
+  { kb: "Ngikalakala izuwa yoso.", pt: "Trabalho todos os dias.", topic: "Quotidiano" },
+  { kb: "Eme ngizeka mu ngoloxi kyoso.", pt: "Eu durmo sempre à tarde.", topic: "Quotidiano" },
+  { kb: "Ngondo banza kwal'eye izuwa yoso.", pt: "Pensarei em ti todos os dias.", topic: "Sentimentos" },
+];
+
+// ============================================================
+// ESTRUTURA DAS AULAS
+// ============================================================
+const AULAS = [
+  {
+    n: 0, titulo: "Dízwi dya Kimbundu", subtitulo: "Introdução à Língua",
+    topicos: [
+      "O Kimbundu é uma língua Níger-Congo, falada pelo povo Ambundu em Angola.",
+      "Falado em 6 províncias: Luanda, Bengo, Kwanza-Norte, Kwanza-Sul, Malanje e parte do Uíge.",
+      "Variantes: Ngola, Mbaka, Ntemu, Ndongo, Ngoya, Songo.",
+      "Influenciou o português falado em Angola, Brasil e Portugal (bué, xingar, bunda…).",
+      "Saudações por período do dia: manhã, tarde, noite.",
+      "Números de 0 a 10, idade, e membros da família.",
+    ],
+  },
+  {
+    n: 1, titulo: "Itote ya Kimbundu", subtitulo: "Alfabeto e Formas de Escrever",
+    topicos: [
+      "Alfabeto kimbundu inclui letras simples e compostas: BH, MB, NJ, NG, NY, PH, TH, MV, NZ, ND.",
+      "Vogais: a, e, i, o, u. Semivogais: y, w.",
+      "Em algumas zonas, DI fala-se RI: Kúdya → Kúrya (comer).",
+      "Não existe NH — usa-se NY (Menya = água, lê-se 'menha').",
+      "S entre vogais lê-se SS (Musambu = mussambu).",
+      "GE/GI lê-se GUE/GUI. Usa-se X em vez de CH (Muxi = árvore).",
+      "Vogais não se unem: Ngayáva, Kisangwa, Múngwa.",
+      "Contrações comuns: Mon'ami (meu filho), Mam'etu (minha mãe).",
+    ],
+  },
+  {
+    n: 2, titulo: "Kulungika ni Kuzwela", subtitulo: "Forma de Pronunciar",
+    topicos: [
+      "Existem várias formas legítimas de pronunciar — não há uma única 'correta'.",
+      "Exemplo 'Aonde vais?': Wolo ya kwebi? (Luanda) / Boya kwé? (Bengo) / Wa mu ya kwebi? (Ambaca).",
+      "'Estou a fazer': Ngolo banga (Luanda) / Nga mu banga (Ambaca) / Ngalo banga (Ngulungu).",
+      "Substituição de sons: Phexi/Mphexi (cachimbo), Ngoji/Loji (corda).",
+      "Variações verbais: Kubokona/Kubokola (entrar), Kutumisa/Kutumixa (mandar).",
+      "Variações nos finais: Dítwi/Dítwe (orelha), Ngó/Ngoho (só).",
+      "Números variam: Moxi/Motxi (1), Yadi/Yari/Kari (2), Dikumi/Kumi/Dikwinyi (10).",
+      "'Nós': Etu / Esu — ambos aceitáveis.",
+    ],
+  },
+  {
+    n: 3, titulo: "Umenekenu", subtitulo: "Formas de Cumprimentar",
+    topicos: [
+      "Cumprimentar muda conforme: período do dia + singular (muthu umoxi) vs plural (athu avulu).",
+      "Manhã (Kimene): Wazekele kyebi? → Ngazekele kyambote.",
+      "Tarde (Ngoloxi): Wa mu nanga kyebi? → Nga-mu-nanga kyambote.",
+      "Final da tarde: Wanange kyebi? → Nganange kyambote.",
+      "Noite: Ngoloxyoyo (sing.) / Ngoloxyenu (pl.).",
+      "Saúdo: Nga-ku-menekena (sing.) / Nga-mu-menekena (pl.).",
+      "Despedidas: Xala kyambote, Mungu wé, Nde ni Nzambi.",
+      "Receber: Tanaku! (sing.) / Tanakwenu! (pl.) → Ngasakidila / Twasakidila.",
+    ],
+  },
+  {
+    n: 4, titulo: "Kwijya ó Kitangana", subtitulo: "Noção de Tempo",
+    topicos: [
+      "Kizuwa = dia / Izuwa = dias.",
+      "Sóna = semana / Jisóna = semanas.",
+      "Mbeji = mês / lua. Muvu = ano.",
+      "Passado: Mâza (ontem), Mazadiná (anteontem), Mazadinaku (há 3 dias).",
+      "Futuro: Mungu (amanhã), Mungudiná (depois de amanhã), Mungudinaku (daqui a 3 dias).",
+      "Lelu = hoje.",
+      "Momentos do dia: Kimene (manhã), Ngoloxi (tarde), Usuku (noite).",
+      "Natureza: Dikumbi (sol), Dyulu (céu), Tetembwa (estrela).",
+      "Clima: Mbámbi (frio), Mbânze (verão), Mvula (chuva).",
+    ],
+  },
+  {
+    n: 5, titulo: "Mwíji / Mukutu wa Muthu", subtitulo: "Família e Corpo Humano",
+    topicos: [
+      "Três formas de dizer família: Mwíji (genealogia), Divúmu (ventre, simbólico), Jindandu (parentes).",
+      "Para distinguir sexo, junta-se Dyala (homem) ou Muhatu (mulher): Phange ya dyala = irmão.",
+      "Cabeça e rosto: Mûtwe (cabeça), Disu (olho), Dikanu (boca), Dimi (língua), Dizunu (nariz).",
+      "Tronco: Thulu (peito), Divúmu (barriga), Muxima (coração), Xingu (pescoço).",
+      "Membros: Lukwaku (braço), Mulembu (dedo), Kináma (perna), Kipumuna (joelho).",
+      "Cabelo e barba: Ndemba, Mwézu.",
+    ],
+  },
+  {
+    n: 6, titulo: "Kúdya ni Kúnwa / Yama", subtitulo: "Comidas, Bebidas e Animais",
+    topicos: [
+      "Pratos típicos: Funji (massa de fuba), Mwamba (molho de amendoim), Mbiji (peixe).",
+      "Ingredientes: Disa (milho), Mbombó (mandioca), Jinguba (amendoim), Maji (óleo).",
+      "Bebidas: Wálwa (alcoólica), Kisângwa (sumo), Muzongé (caldo), Menya (água).",
+      "Frutas: Dihonjo (banana), Múkwa (múcua), Maboke (fruta).",
+      "Animais selvagens: Nzamba (elefante), Hoji (leão), Ngûvu (hipopótamo), Ngandu (crocodilo).",
+      "Animais domésticos: Imbwa (cão), Mungwalaxi (gato), Ngombe (vaca), Sanji (galinha).",
+      "Outros: Njila (pássaro), Nyoki (abelha), Nyoka (cobra).",
+    ],
+  },
+  {
+    n: 7, titulo: "Makowa ni Gramática", subtitulo: "As Cores e Gramática",
+    topicos: [
+      "Cores: Utokwa (cinzento), Pembe (amarelo), Kusuka (vermelho), Kyadyulu (azul), Wisu (verde), Zela (branco), Xikelela (preto).",
+      "Plural dos substantivos varia conforme o prefixo: Mu→A (Mulóngexi → Alóngexi), Mu→Mi (Muhonjo → Mihonjo).",
+      "Di/Dy → Ma (Dijina → Majina), Lu → Malu (Lumwenu → Malumwenu).",
+      "Ka → Tu (Kambwa → Tumbwa), Ku → MaKu (Kúdya → Makúdya).",
+      "Palavras que começam por F, H, I, K, M, N, P, S, T, X → plural com JI (Inzo → Jinzo, Nguba → Jinguba).",
+      "Pronomes: Eme, Eye, Mwene, Etu, Enu, Ene.",
+      "Prefixos verbais no presente: ngi-, u-, u-, tu-, nu/mu-, a-.",
+    ],
+  },
+  {
+    n: 8, titulo: "Izwelu ya Kimbundu", subtitulo: "Verbos em Kimbundu",
+    topicos: [
+      "Passado: nga-, wa-, wa-, twa-, nwa/mwa-, a-.",
+      "Futuro: ngondo/ngando, wondo/wando, …, twondo, nwondo/mwondo, ondo/ando.",
+      "Kukala (estar): Ngala (estou), Wala (estás), Twala (estamos).",
+      "Kubanza (pensar) — presente: Ngibanza, Ubanza, Tubanza.",
+      "Kuzeka (dormir) — presente: Ngizeka; passado: Ngazekele; futuro: Ngondo zeka.",
+      "Estrutura típica de frase: Sujeito + Verbo (com prefixo) + Complemento.",
+    ],
+  },
+];
+
+function App() {
+  return <KimbunduApp />;
+}
+
+function KimbunduApp() {
+  const [view, setView] = useState('home');
+  const [selectedAula, setSelectedAula] = useState(null);
+  const [progress, setProgress] = useState({ studiedCards: [], quizScores: [], streak: 0, lastVisit: null });
+  const [userName, setUserNameState] = useState('');
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const setUserName = async (name) => {
+    setUserNameState(name);
+    try {
+      await window.storage.set('kimbundu_username', name);
+    } catch (e) {}
+  };
+
+  // Carregar progresso ao iniciar
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('kimbundu_progress');
+        if (result && result.value) {
+          setProgress(JSON.parse(result.value));
+        }
+      } catch (e) {
+        // primeira vez ou erro — usa default
+      }
+      try {
+        const nameResult = await window.storage.get('kimbundu_username');
+        if (nameResult && nameResult.value) {
+          setUserNameState(nameResult.value);
+        } else {
+          setShowNamePrompt(true);
+        }
+      } catch (e) {
+        setShowNamePrompt(true);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  // Salvar progresso quando muda
+  const saveProgress = async (newProgress) => {
+    setProgress(newProgress);
+    try {
+      await window.storage.set('kimbundu_progress', JSON.stringify(newProgress));
+    } catch (e) {
+      console.error('Erro a guardar progresso:', e);
+    }
+  };
+
+  const markCardStudied = (cardKey) => {
+    if (!progress.studiedCards.includes(cardKey)) {
+      saveProgress({ ...progress, studiedCards: [...progress.studiedCards, cardKey] });
+    }
+  };
+
+  const recordQuiz = (score, total) => {
+    const newScores = [...progress.quizScores, { score, total, date: new Date().toISOString() }];
+    saveProgress({ ...progress, quizScores: newScores });
+  };
+
+  const resetProgress = async () => {
+    const fresh = { studiedCards: [], quizScores: [], streak: 0, lastVisit: null };
+    saveProgress(fresh);
+    try {
+      await window.storage.delete('kimbundu_username');
+    } catch (e) {}
+    setUserNameState('');
+    setShowNamePrompt(true);
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', color: '#d4a574', fontFamily: 'Georgia, serif' }}>
+        Carregando…
+      </div>
+    );
+  }
+
+  return (
+    <div className="kb-app">
+      <style>{STYLES}</style>
+      {showNamePrompt && (
+        <NamePrompt onSave={(name) => {
+          setUserName(name);
+          setShowNamePrompt(false);
+        }} onSkip={() => setShowNamePrompt(false)} />
+      )}
+      <Header view={view} setView={setView} progress={progress} />
+      <main className="kb-main">
+        {view === 'home' && <Home setView={setView} progress={progress} setSelectedAula={setSelectedAula} userName={userName} setUserName={setUserName} />}
+        {view === 'aulas' && <AulasList setSelectedAula={(a) => { setSelectedAula(a); setView('aula'); }} />}
+        {view === 'aula' && selectedAula !== null && (
+          <AulaDetail aula={AULAS[selectedAula]} back={() => setView('aulas')} />
+        )}
+        {view === 'flashcards' && (
+          <Flashcards markStudied={markCardStudied} studied={progress.studiedCards} />
+        )}
+        {view === 'quiz' && <Quiz recordQuiz={recordQuiz} />}
+        {view === 'dicionario' && <Dicionario />}
+        {view === 'verbos' && <Verbos />}
+        {view === 'frases' && <Frases />}
+        {view === 'treino' && <TreinoDiario markStudied={markCardStudied} />}
+        {view === 'progresso' && <Progresso progress={progress} reset={resetProgress} />}
+      </main>
+      <footer className="kb-footer">
+        <span>Xalenu kyambote! · Mungu say dingi!</span>
+      </footer>
+    </div>
+  );
+}
+
+// ============================================================
+// HEADER + NAVEGAÇÃO
+// ============================================================
+function Header({ view, setView, progress }) {
+  const tabs = [
+    { id: 'home', label: 'Início' },
+    { id: 'aulas', label: 'Aulas' },
+    { id: 'flashcards', label: 'Flashcards' },
+    { id: 'quiz', label: 'Quiz' },
+    { id: 'verbos', label: 'Verbos' },
+    { id: 'frases', label: 'Frases' },
+    { id: 'dicionario', label: 'Dicionário' },
+    { id: 'treino', label: 'Treino' },
+    { id: 'progresso', label: 'Progresso' },
+  ];
+  return (
+    <header className="kb-header">
+      <div className="kb-brand" onClick={() => setView('home')}>
+        <div className="kb-brand-mark">K</div>
+        <div>
+          <h1 className="kb-brand-title">Kimbundu</h1>
+          <p className="kb-brand-sub">Dízwi dya Kimbundu — Estudo prático</p>
+        </div>
+      </div>
+      <nav className="kb-nav">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            className={`kb-nav-btn ${view === t.id ? 'active' : ''}`}
+            onClick={() => setView(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+    </header>
+  );
+}
+
+// ============================================================
+// HOME / DASHBOARD
+// ============================================================
+function Home({ setView, progress, setSelectedAula, userName, setUserName }) {
+  const totalCards = ALL_VOCAB.length;
+  const studied = progress.studiedCards.length;
+  const pct = Math.round((studied / totalCards) * 100);
+
+  return (
+    <div className="kb-home">
+      <section className="kb-hero">
+        <div className="kb-hero-ornament">◆ ◇ ◆</div>
+        <h2 className="kb-hero-title">Tanaku{userName ? `, ${userName}` : ", akamba"}!</h2>
+        <p className="kb-hero-greet">{userName ? "Bem-vindo de volta ao teu estudo de Kimbundu." : "Bem-vindos ao estudo da língua Kimbundu."}</p>
+        <p className="kb-hero-sub">9 aulas · {totalCards} palavras · {VERBOS.length} verbos · {FRASES.length} frases</p>
+        <div className="kb-tts-notice">
+          <span className="kb-tts-icon">🔊</span>
+          <span><strong>Pronúncia aproximada:</strong> os botões de áudio usam voz portuguesa do dispositivo. É uma referência inicial, não substitui um falante nativo de Kimbundu.</span>
+        </div>
+        {userName && (
+          <button className="kb-change-name" onClick={() => {
+            const novo = prompt("Novo nome:", userName);
+            if (novo && novo.trim()) setUserName(novo.trim());
+          }}>Não és tu? Mudar nome</button>
+        )}
+      </section>
+
+      <section className="kb-stats">
+        <div className="kb-stat">
+          <div className="kb-stat-value">{studied}</div>
+          <div className="kb-stat-label">Palavras estudadas</div>
+          <div className="kb-bar"><div className="kb-bar-fill" style={{ width: `${pct}%` }} /></div>
+          <div className="kb-stat-pct">{pct}% do total</div>
+        </div>
+        <div className="kb-stat">
+          <div className="kb-stat-value">{progress.quizScores.length}</div>
+          <div className="kb-stat-label">Quizzes feitos</div>
+          {progress.quizScores.length > 0 && (
+            <div className="kb-stat-pct">
+              Última: {progress.quizScores[progress.quizScores.length - 1].score}/{progress.quizScores[progress.quizScores.length - 1].total}
+            </div>
+          )}
+        </div>
+        <div className="kb-stat">
+          <div className="kb-stat-value">9</div>
+          <div className="kb-stat-label">Aulas disponíveis</div>
+          <div className="kb-stat-pct">Da Aula 0 à 8</div>
+        </div>
+      </section>
+
+      <IdadeTradutor />
+
+      <section className="kb-quick">
+        <h3 className="kb-section-title">Como queres estudar hoje?</h3>
+        <div className="kb-quick-grid">
+          <QuickCard
+            label="Treino diário"
+            desc="10 palavras aleatórias para revisar agora."
+            onClick={() => setView('treino')}
+          />
+          <QuickCard
+            label="Flashcards"
+            desc="Vira o cartão, pratica memória ativa."
+            onClick={() => setView('flashcards')}
+          />
+          <QuickCard
+            label="Quiz"
+            desc="10 perguntas. Vê quanto sabes."
+            onClick={() => setView('quiz')}
+          />
+          <QuickCard
+            label="Ver as aulas"
+            desc="Resumo de cada uma das 9 aulas."
+            onClick={() => setView('aulas')}
+          />
+          <QuickCard
+            label="Verbos"
+            desc="Conjugações no presente, passado e futuro."
+            onClick={() => setView('verbos')}
+          />
+          <QuickCard
+            label="Frases úteis"
+            desc="Apresentações, perguntas, despedidas."
+            onClick={() => setView('frases')}
+          />
+        </div>
+      </section>
+
+      <section className="kb-quick">
+        <h3 className="kb-section-title">Aulas</h3>
+        <div className="kb-aulas-mini">
+          {AULAS.map((a, i) => (
+            <button key={a.n} className="kb-aula-mini" onClick={() => { setSelectedAula(i); setView('aula'); }}>
+              <span className="kb-aula-num">{a.n}</span>
+              <span className="kb-aula-titulo">{a.titulo}</span>
+              <span className="kb-aula-sub">{a.subtitulo}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function QuickCard({ label, desc, onClick }) {
+  return (
+    <button className="kb-quick-card" onClick={onClick}>
+      <div className="kb-quick-label">{label}</div>
+      <div className="kb-quick-desc">{desc}</div>
+      <div className="kb-quick-arrow">→</div>
+    </button>
+  );
+}
+
+// ============================================================
+// LISTA DE AULAS
+// ============================================================
+function AulasList({ setSelectedAula }) {
+  return (
+    <div className="kb-aulas">
+      <h2 className="kb-page-title">As 9 Aulas</h2>
+      <p className="kb-page-sub">Clica numa aula para ver o resumo dos pontos principais.</p>
+      <div className="kb-aulas-grid">
+        {AULAS.map((a, i) => (
+          <article key={a.n} className="kb-aula-card" onClick={() => setSelectedAula(i)}>
+            <div className="kb-aula-card-num">Aula {a.n}</div>
+            <h3 className="kb-aula-card-titulo">{a.titulo}</h3>
+            <p className="kb-aula-card-sub">{a.subtitulo}</p>
+            <div className="kb-aula-card-meta">{a.topicos.length} pontos-chave</div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DETALHE DE UMA AULA
+// ============================================================
+function AulaDetail({ aula, back }) {
+  return (
+    <div className="kb-aula-detail">
+      <button className="kb-back" onClick={back}>← Voltar às aulas</button>
+      <div className="kb-aula-header">
+        <div className="kb-aula-card-num">Aula {aula.n}</div>
+        <h2 className="kb-page-title">{aula.titulo}</h2>
+        <p className="kb-page-sub">{aula.subtitulo}</p>
+      </div>
+      <div className="kb-aula-content">
+        <h3 className="kb-section-title">Pontos-chave</h3>
+        <ol className="kb-topics">
+          {aula.topicos.map((t, i) => (
+            <li key={i} className="kb-topic">{t}</li>
+          ))}
+        </ol>
+        {(aula.n === 1 || aula.n === 2) && (
+          <div className="kb-aula-pronun">
+            <h4>Regras de pronúncia importantes</h4>
+            <ul>
+              <li><strong>NY</strong> lê-se "NH" — <em>Menya</em> = "menha" (água) <SpeakButton text="Menya" size="small" /></li>
+              <li><strong>S entre vogais</strong> lê-se "SS" — <em>Musambu</em> = "mussambu" <SpeakButton text="Musambu" size="small" /></li>
+              <li><strong>GE / GI</strong> lê-se "GUE / GUI" — <em>Ndenge</em> = "ndengue" <SpeakButton text="Ndenge" size="small" /></li>
+              <li><strong>X</strong> lê-se como em "xadrez" — <em>Muxi</em> = "muchi" (árvore) <SpeakButton text="Muxi" size="small" /></li>
+              <li><strong>DI</strong> pode ler-se "RI" em algumas zonas — <em>Kúdya</em> = "Kúrya" (comer) <SpeakButton text="Kudya" size="small" /></li>
+              <li><strong>Final E</strong> lê-se com som de "É" aberto — <em>Ndé</em> (vá!) <SpeakButton text="Nde" size="small" /></li>
+            </ul>
+            <p className="kb-aula-pronun-note">⚠️ Os botões 🔊 usam voz portuguesa do teu dispositivo. É uma referência aproximada — para a pronúncia autêntica, ouve falantes nativos ou as músicas das aulas.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// FLASHCARDS
+// ============================================================
+function Flashcards({ markStudied, studied }) {
+  const [category, setCategory] = useState('all');
+  const [direction, setDirection] = useState('kb-pt'); // ou 'pt-kb'
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+
+  const cards = useMemo(() => {
+    if (category === 'all') return ALL_VOCAB;
+    return VOCAB[category] || [];
+  }, [category]);
+
+  useEffect(() => {
+    setIdx(0);
+    setFlipped(false);
+  }, [category, direction]);
+
+  if (cards.length === 0) return <div>Sem cartões.</div>;
+
+  const card = cards[idx];
+  const front = direction === 'kb-pt' ? card.kb : card.pt;
+  const back = direction === 'kb-pt' ? card.pt : card.kb;
+  const cardKey = `${card.kb}|${card.pt}`;
+  const isStudied = studied.includes(cardKey);
+
+  const next = () => {
+    if (!isStudied) markStudied(cardKey);
+    setFlipped(false);
+    setIdx((i) => (i + 1) % cards.length);
+  };
+  const prev = () => {
+    setFlipped(false);
+    setIdx((i) => (i - 1 + cards.length) % cards.length);
+  };
+
+  const cats = ['all', ...Object.keys(VOCAB)];
+  const catLabels = {
+    all: 'Tudo',
+    saudacoes: 'Saudações',
+    numeros: 'Números',
+    familia: 'Família',
+    corpo: 'Corpo',
+    tempo: 'Tempo',
+    comidaBebida: 'Comida & Bebida',
+    animais: 'Animais',
+    cores: 'Cores',
+    pronomes: 'Pronomes',
+    outras: 'Outras',
+  };
+
+  return (
+    <div className="kb-flashcards">
+      <h2 className="kb-page-title">Flashcards</h2>
+      <p className="kb-page-sub">Clica no cartão para virar. Avança quando souberes.</p>
+
+      <div className="kb-controls">
+        <div className="kb-control-group">
+          <label className="kb-label">Categoria</label>
+          <select className="kb-select" value={category} onChange={(e) => setCategory(e.target.value)}>
+            {cats.map(c => <option key={c} value={c}>{catLabels[c]} ({c === 'all' ? ALL_VOCAB.length : VOCAB[c].length})</option>)}
+          </select>
+        </div>
+        <div className="kb-control-group">
+          <label className="kb-label">Direção</label>
+          <div className="kb-toggle">
+            <button className={direction === 'kb-pt' ? 'active' : ''} onClick={() => setDirection('kb-pt')}>Kimbundu → PT</button>
+            <button className={direction === 'pt-kb' ? 'active' : ''} onClick={() => setDirection('pt-kb')}>PT → Kimbundu</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="kb-flashcard-area">
+        <div className="kb-flashcard-meta">
+          <span>{idx + 1} / {cards.length}</span>
+          {isStudied && <span className="kb-tag">✓ estudada</span>}
+          <span className="kb-tag-cat">{card.cat}</span>
+        </div>
+        <button className={`kb-flashcard ${flipped ? 'flipped' : ''}`} onClick={() => setFlipped(f => !f)}>
+          <div className="kb-flashcard-inner">
+            <div className="kb-flashcard-side kb-flashcard-front">
+              <div className="kb-flashcard-hint">{direction === 'kb-pt' ? 'Kimbundu' : 'Português'}</div>
+              <div className="kb-flashcard-text">{front}</div>
+              {direction === 'kb-pt' && <div className="kb-flashcard-speak"><SpeakButton text={card.kb} size="big" /></div>}
+              <div className="kb-flashcard-tip">Clica para ver a tradução</div>
+            </div>
+            <div className="kb-flashcard-side kb-flashcard-back">
+              <div className="kb-flashcard-hint">{direction === 'kb-pt' ? 'Português' : 'Kimbundu'}</div>
+              <div className="kb-flashcard-text">{back}</div>
+              {direction === 'pt-kb' && <div className="kb-flashcard-speak"><SpeakButton text={card.kb} size="big" /></div>}
+              <div className="kb-flashcard-tip">Clica para voltar</div>
+            </div>
+          </div>
+        </button>
+        <div className="kb-flashcard-nav">
+          <button className="kb-btn" onClick={prev}>← Anterior</button>
+          <button className="kb-btn kb-btn-primary" onClick={next}>Próxima →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// QUIZ
+// ============================================================
+function Quiz({ recordQuiz }) {
+  const [stage, setStage] = useState('setup'); // setup, playing, done
+  const [direction, setDirection] = useState('kb-pt');
+  const [questions, setQuestions] = useState([]);
+  const [current, setCurrent] = useState(0);
+  const [score, setScore] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [feedback, setFeedback] = useState(null);
+
+  const start = () => {
+    const shuffled = [...ALL_VOCAB].sort(() => Math.random() - 0.5).slice(0, 10);
+    const qs = shuffled.map((item) => {
+      const distractors = ALL_VOCAB
+        .filter(v => v.kb !== item.kb)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3);
+      const options = [...distractors, item].sort(() => Math.random() - 0.5);
+      return {
+        prompt: direction === 'kb-pt' ? item.kb : item.pt,
+        correct: direction === 'kb-pt' ? item.pt : item.kb,
+        options: options.map(o => direction === 'kb-pt' ? o.pt : o.kb)
+      };
+    });
+    setQuestions(qs);
+    setCurrent(0);
+    setScore(0);
+    setSelected(null);
+    setFeedback(null);
+    setStage('playing');
+  };
+
+  const answer = (option) => {
+    if (selected) return;
+    setSelected(option);
+    if (option === questions[current].correct) {
+      setScore(s => s + 1);
+      setFeedback('correct');
+    } else {
+      setFeedback('wrong');
+    }
+  };
+
+  const nextQ = () => {
+    if (current + 1 >= questions.length) {
+      recordQuiz(score, questions.length);
+      setStage('done');
+    } else {
+      setCurrent(c => c + 1);
+      setSelected(null);
+      setFeedback(null);
+    }
+  };
+
+  if (stage === 'setup') {
+    return (
+      <div className="kb-quiz">
+        <h2 className="kb-page-title">Quiz</h2>
+        <p className="kb-page-sub">10 perguntas para testares os teus conhecimentos.</p>
+        <div className="kb-controls">
+          <div className="kb-control-group">
+            <label className="kb-label">Direção</label>
+            <div className="kb-toggle">
+              <button className={direction === 'kb-pt' ? 'active' : ''} onClick={() => setDirection('kb-pt')}>Kimbundu → PT</button>
+              <button className={direction === 'pt-kb' ? 'active' : ''} onClick={() => setDirection('pt-kb')}>PT → Kimbundu</button>
+            </div>
+          </div>
+        </div>
+        <button className="kb-btn kb-btn-primary kb-btn-big" onClick={start}>Começar quiz</button>
+      </div>
+    );
+  }
+
+  if (stage === 'done') {
+    const pct = Math.round((score / questions.length) * 100);
+    let msg;
+    if (pct >= 90) msg = "Excelente! Quase perfeito.";
+    else if (pct >= 70) msg = "Muito bem! Continua assim.";
+    else if (pct >= 50) msg = "Bom esforço — revê os flashcards.";
+    else msg = "Sem stress — pratica mais e tenta de novo.";
+    return (
+      <div className="kb-quiz kb-quiz-done">
+        <h2 className="kb-page-title">Resultado</h2>
+        <div className="kb-result-score">{score}<span>/{questions.length}</span></div>
+        <div className="kb-result-pct">{pct}%</div>
+        <p className="kb-result-msg">{msg}</p>
+        <button className="kb-btn kb-btn-primary" onClick={start}>Novo quiz</button>
+        <button className="kb-btn" onClick={() => setStage('setup')}>Voltar</button>
+      </div>
+    );
+  }
+
+  const q = questions[current];
+  return (
+    <div className="kb-quiz">
+      <div className="kb-quiz-meta">
+        <span>Pergunta {current + 1} de {questions.length}</span>
+        <span>Acertos: {score}</span>
+      </div>
+      <div className="kb-quiz-bar">
+        <div className="kb-quiz-bar-fill" style={{ width: `${((current) / questions.length) * 100}%` }} />
+      </div>
+      <div className="kb-quiz-card">
+        <div className="kb-quiz-hint">Qual a tradução de:</div>
+        <div className="kb-quiz-prompt">
+          <span>{q.prompt}</span>
+          {direction === 'kb-pt' && <SpeakButton text={q.prompt} size="normal" />}
+        </div>
+        <div className="kb-quiz-options">
+          {q.options.map((opt, i) => {
+            const isCorrect = selected && opt === q.correct;
+            const isWrong = selected === opt && opt !== q.correct;
+            return (
+              <button
+                key={i}
+                className={`kb-quiz-option ${isCorrect ? 'correct' : ''} ${isWrong ? 'wrong' : ''} ${selected ? 'disabled' : ''}`}
+                onClick={() => answer(opt)}
+                disabled={!!selected}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+        {feedback && (
+          <div className={`kb-feedback ${feedback}`}>
+            {feedback === 'correct' ? '✓ Correto!' : `✗ Resposta certa: ${q.correct}`}
+            <button className="kb-btn kb-btn-primary" onClick={nextQ}>
+              {current + 1 >= questions.length ? 'Ver resultado' : 'Próxima'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DICIONÁRIO
+// ============================================================
+function Dicionario() {
+  const [query, setQuery] = useState('');
+  const [filterCat, setFilterCat] = useState('all');
+
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase().trim();
+    return ALL_VOCAB.filter(v => {
+      if (filterCat !== 'all' && v.cat !== filterCat) return false;
+      if (!q) return true;
+      return v.kb.toLowerCase().includes(q) || v.pt.toLowerCase().includes(q);
+    });
+  }, [query, filterCat]);
+
+  const cats = ['all', ...new Set(ALL_VOCAB.map(v => v.cat))];
+
+  return (
+    <div className="kb-dic">
+      <h2 className="kb-page-title">Dicionário</h2>
+      <p className="kb-page-sub">{ALL_VOCAB.length} palavras das 9 aulas. Pesquisa em Kimbundu ou Português.</p>
+      <div className="kb-controls">
+        <input
+          className="kb-input"
+          placeholder="Pesquisar… (ex: água, mama, leão)"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <select className="kb-select" value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
+          {cats.map(c => <option key={c} value={c}>{c === 'all' ? 'Todas categorias' : c}</option>)}
+        </select>
+      </div>
+      <div className="kb-dic-results">
+        <div className="kb-dic-count">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''}</div>
+        <div className="kb-dic-list">
+          {filtered.map((v, i) => (
+            <div key={i} className="kb-dic-item">
+              <div className="kb-dic-kb">
+                <SpeakButton text={v.kb} size="small" />
+                <span>{v.kb}</span>
+              </div>
+              <div className="kb-dic-pt">{v.pt}</div>
+              <span className="kb-dic-cat">{v.cat}</span>
+            </div>
+          ))}
+          {filtered.length === 0 && <div className="kb-empty">Nenhuma palavra encontrada.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// VERBOS
+// ============================================================
+function Verbos() {
+  const [selected, setSelected] = useState('Kukala');
+
+  const detalhes = CONJ_EXEMPLOS[selected];
+
+  return (
+    <div className="kb-verbos">
+      <h2 className="kb-page-title">Verbos</h2>
+      <p className="kb-page-sub">Em Kimbundu, os verbos começam com Ku- (infinitivo). A conjugação faz-se por prefixos antes do radical.</p>
+
+      <section className="kb-verbos-prefixos">
+        <h3 className="kb-section-title">Prefixos por tempo</h3>
+        <div className="kb-table-wrap">
+          <table className="kb-table">
+            <thead>
+              <tr><th>Pronome</th><th>Presente</th><th>Passado</th><th>Futuro</th></tr>
+            </thead>
+            <tbody>
+              {Object.keys(CONJ_PRESENTE).map(p => (
+                <tr key={p}>
+                  <td className="kb-td-pron">{p}</td>
+                  <td>{CONJ_PRESENTE[p]}</td>
+                  <td>{CONJ_PASSADO[p]}</td>
+                  <td>{CONJ_FUTURO[p]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="kb-section-title">Lista de verbos ({VERBOS.length})</h3>
+        <div className="kb-verbos-list">
+          {VERBOS.map(v => (
+            <button
+              key={v.inf}
+              className={`kb-verbo-chip ${selected === v.inf ? 'active' : ''}`}
+              onClick={() => setSelected(v.inf)}
+              disabled={!CONJ_EXEMPLOS[v.inf]}
+              title={!CONJ_EXEMPLOS[v.inf] ? 'Conjugação detalhada não disponível — usa os prefixos acima' : ''}
+            >
+              <span className="kb-verbo-inf">{v.inf}</span>
+              <span className="kb-verbo-pt">{v.pt}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {detalhes && (
+        <section className="kb-conj-detail">
+          <h3 className="kb-section-title">Conjugação completa: {selected} ({VERBOS.find(v => v.inf === selected).pt})</h3>
+          <div className="kb-conj-grid">
+            <div className="kb-conj-tempo">
+              <h4>Presente</h4>
+              <ul>
+                {Object.entries(detalhes.presente).map(([p, f]) => (
+                  <li key={p}><strong>{p}</strong> <span>{f}</span></li>
+                ))}
+              </ul>
+            </div>
+            <div className="kb-conj-tempo">
+              <h4>Passado</h4>
+              <ul>
+                {Object.entries(detalhes.passado).map(([p, f]) => (
+                  <li key={p}><strong>{p}</strong> <span>{f}</span></li>
+                ))}
+              </ul>
+            </div>
+            <div className="kb-conj-tempo">
+              <h4>Futuro</h4>
+              <ul>
+                {Object.entries(detalhes.futuro).map(([p, f]) => (
+                  <li key={p}><strong>{p}</strong> <span>{f}</span></li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FRASES
+// ============================================================
+function Frases() {
+  const [showPT, setShowPT] = useState({});
+  const topics = [...new Set(FRASES.map(f => f.topic))];
+
+  return (
+    <div className="kb-frases">
+      <h2 className="kb-page-title">Frases úteis</h2>
+      <p className="kb-page-sub">Tenta dizer em português antes de revelar — boa prática.</p>
+      {topics.map(t => (
+        <section key={t} className="kb-frases-topic">
+          <h3 className="kb-section-title">{t}</h3>
+          <div className="kb-frases-list">
+            {FRASES.filter(f => f.topic === t).map((f, i) => {
+              const key = `${t}-${i}`;
+              const open = showPT[key];
+              return (
+                <div key={key} className="kb-frase-item">
+                  <div className="kb-frase-kb">
+                    <SpeakButton text={f.kb} size="small" />
+                    <span>{f.kb}</span>
+                  </div>
+                  <button className="kb-frase-toggle" onClick={() => setShowPT(s => ({ ...s, [key]: !s[key] }))}>
+                    {open ? f.pt : 'Mostrar tradução'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// TREINO DIÁRIO
+// ============================================================
+function TreinoDiario({ markStudied }) {
+  const [round, setRound] = useState(0); // forçar re-roll
+  const [revealed, setRevealed] = useState({});
+
+  const palavras = useMemo(() => {
+    return [...ALL_VOCAB].sort(() => Math.random() - 0.5).slice(0, 10);
+  }, [round]);
+
+  const reveal = (i, card) => {
+    setRevealed(r => ({ ...r, [i]: true }));
+    markStudied(`${card.kb}|${card.pt}`);
+  };
+
+  return (
+    <div className="kb-treino">
+      <h2 className="kb-page-title">Treino diário</h2>
+      <p className="kb-page-sub">10 palavras aleatórias. Tenta dizer em português antes de revelar.</p>
+      <button className="kb-btn" onClick={() => { setRound(r => r + 1); setRevealed({}); }}>↻ Novas palavras</button>
+      <div className="kb-treino-list">
+        {palavras.map((p, i) => (
+          <div key={`${round}-${i}`} className="kb-treino-item">
+            <div className="kb-treino-num">{i + 1}</div>
+            <div className="kb-treino-kb">
+              <SpeakButton text={p.kb} size="small" />
+              <span>{p.kb}</span>
+            </div>
+            {revealed[i] ? (
+              <div className="kb-treino-pt">{p.pt}</div>
+            ) : (
+              <button className="kb-btn kb-btn-small" onClick={() => reveal(i, p)}>Revelar</button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PROGRESSO
+// ============================================================
+function Progresso({ progress, reset }) {
+  const totalCards = ALL_VOCAB.length;
+  const studied = progress.studiedCards.length;
+  const pct = Math.round((studied / totalCards) * 100);
+  const quizScores = progress.quizScores;
+  const avg = quizScores.length > 0
+    ? Math.round((quizScores.reduce((sum, q) => sum + (q.score / q.total) * 100, 0) / quizScores.length))
+    : 0;
+
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  return (
+    <div className="kb-progresso">
+      <h2 className="kb-page-title">O teu progresso</h2>
+      <p className="kb-page-sub">Tudo guardado localmente no teu browser.</p>
+
+      <div className="kb-stats">
+        <div className="kb-stat">
+          <div className="kb-stat-value">{studied}/{totalCards}</div>
+          <div className="kb-stat-label">Palavras vistas em flashcards</div>
+          <div className="kb-bar"><div className="kb-bar-fill" style={{ width: `${pct}%` }} /></div>
+          <div className="kb-stat-pct">{pct}%</div>
+        </div>
+        <div className="kb-stat">
+          <div className="kb-stat-value">{quizScores.length}</div>
+          <div className="kb-stat-label">Quizzes realizados</div>
+          <div className="kb-stat-pct">Média: {avg}%</div>
+        </div>
+      </div>
+
+      {quizScores.length > 0 && (
+        <section>
+          <h3 className="kb-section-title">Histórico de quizzes</h3>
+          <div className="kb-quiz-history">
+            {[...quizScores].reverse().map((q, i) => (
+              <div key={i} className="kb-quiz-history-item">
+                <span>{new Date(q.date).toLocaleString('pt-PT')}</span>
+                <span className="kb-quiz-history-score">{q.score}/{q.total}</span>
+                <span>({Math.round((q.score / q.total) * 100)}%)</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section style={{ marginTop: '3rem' }}>
+        <h3 className="kb-section-title">Recomeçar</h3>
+        {!confirmReset ? (
+          <button className="kb-btn" onClick={() => setConfirmReset(true)}>Apagar o meu progresso</button>
+        ) : (
+          <div className="kb-confirm">
+            <p>Tens a certeza? Vais perder tudo.</p>
+            <button className="kb-btn kb-btn-danger" onClick={() => { reset(); setConfirmReset(false); }}>Sim, apagar</button>
+            <button className="kb-btn" onClick={() => setConfirmReset(false)}>Cancelar</button>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+
+
+
+
+
+// Botão reutilizável para falar uma palavra/frase
+function SpeakButton({ text, size = 'normal', label = 'Ouvir pronúncia' }) {
+  const [speaking, setSpeaking] = useState(false);
+  const handleClick = (e) => {
+    e.stopPropagation();
+    setSpeaking(true);
+    KbTTS.speak(text);
+    setTimeout(() => setSpeaking(false), Math.max(1000, text.length * 80));
+  };
+  const cls = `kb-speak ${size === 'small' ? 'kb-speak-small' : ''} ${size === 'big' ? 'kb-speak-big' : ''} ${speaking ? 'speaking' : ''}`;
+  return (
+    <button className={cls} onClick={handleClick} aria-label={label} title={label}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+      </svg>
+    </button>
+  );
+}
+
+// ============================================================
+// MODAL DE NOME (perguntar o nome na primeira vez)
+// ============================================================
+function NamePrompt({ onSave, onSkip }) {
+  const [name, setName] = useState('');
+  const handleSubmit = () => {
+    if (name.trim()) onSave(name.trim());
+  };
+  return (
+    <div className="kb-modal-backdrop">
+      <div className="kb-modal">
+        <div className="kb-modal-ornament">◆ ◇ ◆</div>
+        <h2 className="kb-modal-title">Tanaku!</h2>
+        <p className="kb-modal-sub">Bem-vindo ao estudo da língua Kimbundu.</p>
+        <label className="kb-label" style={{marginTop: '1.5rem'}}>Dijina dyé nanyi? (Qual é o teu nome?)</label>
+        <input
+          className="kb-input"
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+          placeholder="Escreve o teu nome…"
+          style={{width: '100%', marginTop: '0.5rem'}}
+        />
+        <div style={{display: 'flex', gap: '0.5rem', marginTop: '1.25rem'}}>
+          <button className="kb-btn kb-btn-primary" onClick={handleSubmit} disabled={!name.trim()}>Começar</button>
+          <button className="kb-btn" onClick={onSkip}>Saltar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TRADUTOR DE IDADE
+// ============================================================
+const NUMS_KB = {
+  0: "hatu", 1: "moxi", 2: "yadi", 3: "tatu", 4: "wana", 5: "tanu",
+  6: "samanu", 7: "sambwadi", 8: "dinake", 9: "divwa", 10: "dikwinyi"
+};
+const DEZENAS_KB = {
+  2: "makwinyi yadi", 3: "makwinyi tatu", 4: "makwinyi wana",
+  5: "makwinyi tanu", 6: "makwinyi samanu", 7: "makwinyi sambwadi",
+  8: "makwinyi dinake", 9: "makwinyi divwa"
+};
+
+function traduzirNumero(n) {
+  if (n < 0 || n > 99 || !Number.isInteger(n)) return null;
+  if (n <= 10) return NUMS_KB[n];
+  if (n < 20) {
+    // 11-19: dikwinyi ni [unidade]
+    return `dikwinyi ni ${NUMS_KB[n - 10]}`;
+  }
+  const dezena = Math.floor(n / 10);
+  const unidade = n % 10;
+  if (unidade === 0) return DEZENAS_KB[dezena];
+  return `${DEZENAS_KB[dezena]} ni ${NUMS_KB[unidade]}`;
+}
+
+function IdadeTradutor() {
+  const [idade, setIdade] = useState('');
+  const num = parseInt(idade, 10);
+  const valido = !isNaN(num) && num >= 0 && num <= 99;
+  const trad = valido ? traduzirNumero(num) : null;
+
+  return (
+    <section className="kb-idade-box">
+      <h3 className="kb-section-title">Diz a tua idade em Kimbundu</h3>
+      <p style={{color: 'var(--kb-mute)', fontSize: '0.88rem', margin: '0 0 1rem'}}>
+        Escreve a tua idade (0–99) e vê como se diz em Kimbundu.
+      </p>
+      <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end'}}>
+        <div className="kb-control-group">
+          <label className="kb-label">A tua idade</label>
+          <input
+            className="kb-input"
+            type="number"
+            min="0"
+            max="99"
+            value={idade}
+            onChange={(e) => setIdade(e.target.value)}
+            placeholder="ex: 25"
+            style={{minWidth: '120px'}}
+          />
+        </div>
+      </div>
+      {valido && (
+        <div className="kb-idade-result">
+          <div className="kb-idade-pt">
+            Tenho <strong>{num}</strong> ano{num !== 1 ? 's' : ''}.
+          </div>
+          <div className="kb-idade-kb">
+            <span>Eme ngala kya ni <strong>{trad}</strong> {num === 1 ? 'muvu' : 'mivu'}.</span>
+            <SpeakButton text={`Eme ngala kya ni ${trad} ${num === 1 ? 'muvu' : 'mivu'}`} size="normal" />
+          </div>
+        </div>
+      )}
+      {idade && !valido && (
+        <div style={{color: 'var(--kb-wrong)', marginTop: '0.75rem', fontSize: '0.88rem'}}>
+          Por favor escreve um número entre 0 e 99.
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
